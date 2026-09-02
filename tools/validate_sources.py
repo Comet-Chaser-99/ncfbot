@@ -103,36 +103,68 @@ def validate_sidecar(sidecar_path: Path, validator: Draft202012Validator) -> lis
     if not resource_path.exists():
         errors.append(f"resource_file not found on disk: {resource_path}")
     else:
-        # 5. Check Sources section in Markdown contains the sidecar URLs
+        # 5. Check Sources section in Markdown — exact set equality + final placement
         md_text = resource_path.read_text(encoding="utf-8")
         sidecar_urls = {
             src["canonical_url"]
             for src in data.get("sources", [])
             if src.get("canonical_url")
         }
-        missing_in_md = []
-        for url in sidecar_urls:
-            if url not in md_text:
-                missing_in_md.append(url)
-        if missing_in_md:
-            for url in missing_in_md:
+
+        # Locate all headings to check Sources section placement
+        heading_re = re.compile(r"^#{1,2}\s+\S[^\n]*$", re.MULTILINE)
+        all_headings = [(m.start(), m.group().strip()) for m in heading_re.finditer(md_text)]
+        sources_heading_re = re.compile(r"^#{1,2}\s+sources?\s*$", re.IGNORECASE)
+        sources_positions = [pos for pos, h in all_headings if sources_heading_re.match(h)]
+
+        if not sources_positions:
+            errors.append("Resource Markdown missing a 'Sources' section heading")
+        else:
+            last_sources_pos = sources_positions[-1]
+
+            # Final-section check: no heading may follow ## Sources
+            headings_after = [h for pos, h in all_headings if pos > last_sources_pos]
+            if headings_after:
                 errors.append(
-                    f"Source URL in sidecar but missing from resource Markdown: {url}"
+                    f"Sources section is not the final section; these headings follow it: "
+                    f"{headings_after}"
                 )
 
-        # Check Markdown has a Sources section
-        if not re.search(r"^##?\s+sources?\s*$", md_text, re.IGNORECASE | re.MULTILINE):
-            errors.append("Resource Markdown missing a 'Sources' section heading")
+            # Extract the Sources section body (from heading to next heading or EOF)
+            # and collect all https:// URLs from it — then require exact set equality
+            after_heading = md_text[last_sources_pos:]
+            # Advance past the heading line itself
+            first_newline = after_heading.find("\n")
+            section_body = after_heading[first_newline + 1:] if first_newline != -1 else ""
+            # Next heading ends the section
+            next_heading = heading_re.search(section_body)
+            if next_heading:
+                section_body = section_body[: next_heading.start()]
+
+            raw_urls = re.findall(r"https://[^\s\)\]\>\"\']+", section_body)
+            md_urls = {u.rstrip(".,;)>]\"'") for u in raw_urls}
+
+            missing_in_md = sidecar_urls - md_urls
+            extra_in_md = md_urls - sidecar_urls
+
+            for url in sorted(missing_in_md):
+                errors.append(
+                    f"Source URL in sidecar but missing from Markdown ## Sources section: {url}"
+                )
+            for url in sorted(extra_in_md):
+                errors.append(
+                    f"URL in Markdown ## Sources section but not in sidecar: {url}"
+                )
 
         # Check Markdown has Verified through line
         if not re.search(r"verified through\s*:", md_text, re.IGNORECASE):
             errors.append("Resource Markdown missing 'Verified through: YYYY-MM-DD' near the top")
 
-    # 6. sha256 populated
+    # 6. sha256 populated (schema enforces non-null; this gives a friendlier message)
     for i, src in enumerate(data.get("sources", [])):
         if src.get("sha256") is None:
             errors.append(
-                f"sources[{i}].sha256 is null — run fetch_sources.py to populate"
+                f"sources[{i}].sha256 is null — run fetch_sources.py before validate_sources.py"
             )
         if src.get("public_access_verified") is not True:
             errors.append(

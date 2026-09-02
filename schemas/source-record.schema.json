@@ -101,7 +101,8 @@
           "retrieved_at": {
             "type": "string",
             "format": "date-time",
-            "description": "ISO 8601 UTC timestamp when this URL was independently fetched and verified, e.g. 2026-08-31T14:00:00Z."
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+            "description": "ISO 8601 UTC timestamp when this URL was independently fetched and verified, e.g. 2026-08-31T14:00:00Z. Pattern enforces UTC-only (Z suffix) so validation works without optional format-checker packages."
           },
           "last_modified": {
             "type": ["string", "null"],
@@ -120,9 +121,9 @@
             "description": "Applicable academic year in YYYY-YYYY format, e.g. '2024-2025', or null if not applicable."
           },
           "sha256": {
-            "type": ["string", "null"],
+            "type": "string",
             "pattern": "^[0-9a-f]{64}$",
-            "description": "Lowercase hex SHA-256 digest of the retrieved source body. Must be null before the first fetch; must be populated (non-null) after fetch_sources.py runs successfully."
+            "description": "Lowercase hex SHA-256 digest of the retrieved source body. Required non-null string; run fetch_sources.py before running validate_sources.py."
           },
           "public_access_verified": {
             "type": "boolean",

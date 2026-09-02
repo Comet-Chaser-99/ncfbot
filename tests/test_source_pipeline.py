@@ -384,6 +384,7 @@ class TestFetchContentTypeFilter:
     def test_disallowed_content_type_skipped(self):
         mock_session = MagicMock()
         resp = MagicMock()
+        resp.is_redirect = False  # Not a redirect — proceed to content-type check
         resp.history = []
         resp.status_code = 200
         resp.headers = {"Content-Type": "image/png"}
@@ -517,6 +518,121 @@ class TestSchemaValidation:
         data["volatility"] = "sometimes"
         errors = list(self.validator.iter_errors(data))
         assert len(errors) > 0
+
+    def test_invalid_retrieved_at_fails_schema(self):
+        """Pattern on retrieved_at catches non-datetime strings without relying on FormatChecker."""
+        with (FIXTURES / "valid.source.json").open() as f:
+            data = json.load(f)
+        data["sources"][0]["retrieved_at"] = "not-a-time"
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0, "Schema should reject non-datetime retrieved_at"
+
+    def test_null_sha256_fails_schema(self):
+        """sha256 must be a non-null string — null is rejected by the schema."""
+        with (FIXTURES / "valid.source.json").open() as f:
+            data = json.load(f)
+        data["sources"][0]["sha256"] = None
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0, "Schema should reject null sha256"
+
+
+class TestMarkdownSourcesSection:
+    """validate_sources: exact URL set equality and final-section placement."""
+
+    @pytest.fixture(autouse=True)
+    def skip_if_no_jsonschema(self):
+        pytest.importorskip("jsonschema", reason="jsonschema not installed")
+
+    def setup_method(self):
+        import copy
+        import validate_sources as vs
+        self.vs = vs
+        schema_path = ROOT / "schemas" / "source-record.schema.json"
+        if not schema_path.exists():
+            pytest.skip("source-record.schema.json not present")
+        # Use a schema copy with the resource_file path pattern removed so tests
+        # can use tmp_path absolute paths without tripping the ^resources/...\.md$ constraint.
+        schema = copy.deepcopy(vs.load_schema())
+        schema["properties"]["resource_file"].pop("pattern", None)
+        self.validator = vs.make_validator(schema)
+
+    def _write_sidecar_and_md(self, tmp_path, md_content: str, urls=None):
+        if urls is None:
+            urls = ["https://catalog.ncf.edu/undergraduate/"]
+        md_path = tmp_path / "resource.md"
+        md_path.write_text(md_content, encoding="utf-8")
+        sidecar = tmp_path / "test.source.json"
+        sidecar.write_text(json.dumps({
+            "id": "test-md-check",
+            "resource_file": str(md_path).replace("\\", "/"),  # forward slashes for schema
+            "title": "Test",
+            "audiences": ["students"],
+            "topics": ["test"],
+            "sources": [{
+                "canonical_url": url,
+                "publisher": "NCF",
+                "authority_type": "catalog",
+                "retrieved_at": "2026-08-31T12:00:00Z",
+                "last_modified": None,
+                "effective_from": None,
+                "effective_through": None,
+                "academic_year": None,
+                "sha256": "a" * 64,
+                "public_access_verified": True,
+            } for url in urls],
+            "status": "current",
+            "volatility": "annual",
+            "review_after": "2027-08-01",
+            "notes": "",
+        }), encoding="utf-8")
+        return sidecar
+
+    def test_exact_url_match_passes(self, tmp_path):
+        md = (
+            "# Test\n\nVerified through: 2026-08-31\n\n"
+            "## Sources\n\nhttps://catalog.ncf.edu/undergraduate/\n"
+        )
+        sidecar = self._write_sidecar_and_md(tmp_path, md)
+        errors = self.vs.validate_sidecar(sidecar, self.validator)
+        assert errors == [], errors
+
+    def test_extra_url_in_md_sources_section_fails(self, tmp_path):
+        md = (
+            "# Test\n\nVerified through: 2026-08-31\n\n"
+            "## Sources\n\nhttps://catalog.ncf.edu/undergraduate/\nhttps://www.ncf.edu/extra/\n"
+        )
+        sidecar = self._write_sidecar_and_md(tmp_path, md)
+        errors = self.vs.validate_sidecar(sidecar, self.validator)
+        assert any("not in sidecar" in e for e in errors), errors
+
+    def test_missing_url_in_md_sources_section_fails(self, tmp_path):
+        md = (
+            "# Test\n\nVerified through: 2026-08-31\n\n"
+            "## Sources\n\n(no url here)\n"
+        )
+        sidecar = self._write_sidecar_and_md(tmp_path, md)
+        errors = self.vs.validate_sidecar(sidecar, self.validator)
+        assert any("missing from Markdown" in e for e in errors), errors
+
+    def test_heading_after_sources_section_fails(self, tmp_path):
+        md = (
+            "# Test\n\nVerified through: 2026-08-31\n\n"
+            "## Sources\n\nhttps://catalog.ncf.edu/undergraduate/\n\n"
+            "## Appendix\n\nSome trailing content.\n"
+        )
+        sidecar = self._write_sidecar_and_md(tmp_path, md)
+        errors = self.vs.validate_sidecar(sidecar, self.validator)
+        assert any("final section" in e for e in errors), errors
+
+    def test_sources_section_last_passes(self, tmp_path):
+        md = (
+            "# Test\n\nVerified through: 2026-08-31\n\n"
+            "## Overview\n\nSome content.\n\n"
+            "## Sources\n\nhttps://catalog.ncf.edu/undergraduate/\n"
+        )
+        sidecar = self._write_sidecar_and_md(tmp_path, md)
+        errors = self.vs.validate_sidecar(sidecar, self.validator)
+        assert errors == [], errors
 
 
 class TestDuplicateIdCheck:

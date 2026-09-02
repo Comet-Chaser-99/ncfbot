@@ -229,7 +229,8 @@ def fetch_url(
 
     time.sleep(RATE_LIMIT_SECONDS)
 
-    # Follow redirects manually, validating every hop and the final destination
+    # Follow redirects manually, validating every hop and the final destination.
+    # stream=True on every request so we never buffer a body before the size check.
     current_url = url
     hops: list[str] = []
     try:
@@ -239,18 +240,22 @@ def fetch_url(
                 result["error"] = f"redirect to blocked URL ({hop_err}): {current_url}"
                 log.warning("REDIRECT BLOCKED %s → %s (%s)", url, current_url, hop_err)
                 return result
-            is_final = len(hops) >= 5
             resp = session.get(
                 current_url,
                 timeout=REQUEST_TIMEOUT,
                 allow_redirects=False,
-                stream=is_final,
+                stream=True,  # Always stream — size limit applied before buffering
             )
-            if resp.is_redirect and not is_final:
+            if resp.is_redirect:
+                if len(hops) >= 5:
+                    result["error"] = f"too many redirects (>{len(hops)}) fetching {url}"
+                    log.warning("TOO MANY REDIRECTS %s", url)
+                    return result
                 next_url = resp.headers.get("Location", "")
                 next_url = urllib.parse.urljoin(current_url, next_url)
                 hops.append(current_url)
                 current_url = next_url
+                resp.close()  # Release the connection for this intermediate hop
             else:
                 break
     except requests.RequestException as exc:
