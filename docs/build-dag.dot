@@ -1,0 +1,97 @@
+digraph ncfbot_build_order {
+    // Graph layout
+    rankdir=TB;
+    node [shape=box, style=filled, fontname="Helvetica", fontsize=11];
+    edge [fontsize=9, fontname="Helvetica"];
+
+    // ── Nodes ──────────────────────────────────────────────────────────────
+
+    A1 [label="Agent 1\nagent-1/bootstrap-governance\n(AGENTS.md, README, CONTRIBUTING,\ndocs/architecture, contracts,\npublic-source-policy, resources/README)",
+        fillcolor="#AED6F1", color="#2980B9"];
+
+    A2 [label="Agent 2\nagent-2/student-domain\n(skills/students.md,\nresources/students/,\nresources/shared/academic-calendar.md,\nevaluations/questions/students.jsonl)",
+        fillcolor="#A9DFBF", color="#27AE60"];
+
+    A3 [label="Agent 3\nagent-3/faculty-domain\n(skills/faculty.md,\nresources/faculty/,\nresources/shared/office-routing.md,\nresources/shared/sensitive-referrals.md,\nevaluations/questions/faculty.jsonl)",
+        fillcolor="#A9DFBF", color="#27AE60"];
+
+    A4 [label="Agent 4\nagent-4/outside-domain\n(skills/outside.md,\nresources/outside/,\nresources/shared/glossary.md,\nevaluations/questions/outside.jsonl)",
+        fillcolor="#A9DFBF", color="#27AE60"];
+
+    A5 [label="Agent 5\nagent-5/source-pipeline\n(.gitignore, schemas/source-record.schema.json,\ntools/survey_sources.py, fetch_sources.py,\nconvert_sources.py, validate_sources.py,\ncheck_freshness.py, docs/source-pipeline.md,\nresources/inventory/, resources/generated/,\ntests/test_source_pipeline.py)",
+        fillcolor="#A9DFBF", color="#27AE60"];
+
+    A6 [label="Agent 6\nagent-6/course-data\n(schemas/course-section.schema.json,\ntools/discover_public_terms.py,\nfetch_public_courses.py, query_courses.py,\nbuild_course_history.py, poll_live_sections.py,\nresources/courses/, docs/course-data.md,\ntests/test_courses.py,\nevaluations/questions/courses.jsonl)",
+        fillcolor="#A9DFBF", color="#27AE60"];
+
+    A7 [label="Agent 7\nagent-7/integration-evaluation\n(pyproject.toml, ncfbot/ package,\nschemas/evaluation-case.schema.json,\nevaluations/questions/cross-cutting.jsonl,\ntests/test_router.py, test_retrieval.py,\ntest_repository_contract.py,\ntest_evaluation_data.py,\ndocs/integration-report.md)",
+        fillcolor="#F9E79F", color="#D4AC0D"];
+
+    // ── Merge-order edges (hard dependencies) ────────────────────────────
+
+    A1 -> A2 [label="merges first;\nA2 branches from here", style=bold, color="#2980B9"];
+    A1 -> A3 [label="merges first;\nA3 branches from here", style=bold, color="#2980B9"];
+    A1 -> A4 [label="merges first;\nA4 branches from here", style=bold, color="#2980B9"];
+    A1 -> A5 [label="merges first;\nA5 branches from here", style=bold, color="#2980B9"];
+    A1 -> A6 [label="merges first;\nA6 branches from here", style=bold, color="#2980B9"];
+
+    A2 -> A7 [label="must merge before\nA7 integration PR", style=bold, color="#27AE60"];
+    A3 -> A7 [label="must merge before\nA7 integration PR", style=bold, color="#27AE60"];
+    A4 -> A7 [label="must merge before\nA7 integration PR", style=bold, color="#27AE60"];
+    A5 -> A7 [label="must merge before\nA7 integration PR", style=bold, color="#27AE60"];
+    A6 -> A7 [label="must merge before\nA7 integration PR", style=bold, color="#27AE60"];
+
+    // ── Cross-agent resource dependencies (soft / content dependencies) ──
+
+    A5 -> A2 [label="source-record schema\nvalidates A2 sidecars",
+              style=dashed, color="#7D3C98"];
+    A5 -> A3 [label="source-record schema\nvalidates A3 sidecars",
+              style=dashed, color="#7D3C98"];
+    A5 -> A4 [label="source-record schema\nvalidates A4 sidecars",
+              style=dashed, color="#7D3C98"];
+
+    A6 -> A2 [label="course query tool\nused by student skill",
+              style=dashed, color="#A04000"];
+    A6 -> A3 [label="course query tool\nused by faculty skill",
+              style=dashed, color="#A04000"];
+
+    A3 -> A2 [label="shared sensitive-referrals\nreferenced by student skill",
+              style=dashed, color="#229954"];
+    A3 -> A4 [label="shared office-routing\nreferenced by outside skill",
+              style=dashed, color="#229954"];
+
+    A2 -> A3 [label="catalog summaries\nreferenced by faculty skill",
+              style=dashed, color="#229954"];
+    A2 -> A4 [label="academic-calendar\nreferenced by outside skill",
+              style=dashed, color="#229954"];
+
+    A4 -> A2 [label="shared glossary\nreusable across roles",
+              style=dashed, color="#229954"];
+    A4 -> A3 [label="shared glossary\nreusable across roles",
+              style=dashed, color="#229954"];
+
+    // ── Ranks to enforce visual layers ────────────────────────────────────
+
+    { rank=same; A2; A3; A4; A5; A6; }
+    { rank=source; A1; }
+    { rank=sink; A7; }
+
+    // ── Legend ────────────────────────────────────────────────────────────
+
+    subgraph cluster_legend {
+        label="Legend";
+        fontsize=10;
+        style=dashed;
+        L1 [label="bootstrap /\nfirst merge", fillcolor="#AED6F1",
+            color="#2980B9", shape=box, style=filled];
+        L2 [label="parallel work\n(Agents 2–6)", fillcolor="#A9DFBF",
+            color="#27AE60", shape=box, style=filled];
+        L3 [label="integration /\nlast merge", fillcolor="#F9E79F",
+            color="#D4AC0D", shape=box, style=filled];
+        LE1 [label="merge-order\n(hard)", shape=plaintext];
+        LE2 [label="content dependency\n(soft/dashed)", shape=plaintext];
+        L1 -> L2 [style=bold, color="#2980B9"];
+        L2 -> L3 [style=bold, color="#27AE60"];
+        LE1 -> LE2 [style=dashed, color="#7D3C98"];
+    }
+}
