@@ -73,14 +73,22 @@ def convert_html(body: bytes, source_url: str = "") -> str:
                       "aside", "form", "noscript", "iframe", "svg", "button"]):
         tag.decompose()
 
-    # Also remove common boilerplate by class/id heuristics
+    # Also remove common boilerplate by class/id heuristics.
+    # Two-pass approach: collect all matching tags first, then decompose.
+    # Decomposing during find_all(True) iteration invalidates descendants in the
+    # materialized list, causing AttributeError on the next iteration step.
+    BOILERPLATE_KEYWORDS = [
+        "nav", "menu", "sidebar", "footer", "header",
+        "breadcrumb", "skip", "cookie", "banner", "search-bar",
+    ]
+    to_remove = []
     for tag in soup.find_all(True):
         classes = " ".join(tag.get("class", []))
         id_ = tag.get("id", "")
-        if any(kw in classes.lower() or kw in id_.lower()
-               for kw in ["nav", "menu", "sidebar", "footer", "header",
-                           "breadcrumb", "skip", "cookie", "banner", "search-bar"]):
-            tag.decompose()
+        if any(kw in classes.lower() or kw in id_.lower() for kw in BOILERPLATE_KEYWORDS):
+            to_remove.append(tag)
+    for tag in to_remove:
+        tag.decompose()
 
     lines = []
     if source_url:

@@ -456,6 +456,27 @@ class TestHtmlConversion:
         result = self.cs.convert_html(html, "https://www.ncf.edu/test/")
         assert "https://www.ncf.edu/test/" in result
 
+    def test_nested_boilerplate_does_not_crash(self):
+        """Regression: decomposing a parent tag during find_all(True) iteration
+        invalidated its child nodes, causing AttributeError: 'NoneType' object
+        has no attribute 'get' on the next iteration step.  The fix uses a
+        two-pass approach: collect tags first, then decompose.
+
+        Minimal repro: a boilerplate parent (class="menu") containing a child
+        span — both appear in the flat find_all(True) list.  Without the fix
+        the span becomes None after the parent is decomposed.
+        """
+        html = (
+            b"<html><body>"
+            b'<div class="menu"><span>Menu</span></div>'
+            b"<main><p>Keep this.</p></main>"
+            b"</body></html>"
+        )
+        result = self.cs.convert_html(html, "https://www.ncf.edu/")
+        # Should not raise; boilerplate removed; main content preserved
+        assert "Keep this." in result
+        assert "Menu" not in result
+
 
 # ---------------------------------------------------------------------------
 # validate_sources tests
