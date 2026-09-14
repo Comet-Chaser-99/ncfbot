@@ -456,6 +456,36 @@ class TestHtmlConversion:
         result = self.cs.convert_html(html, "https://www.ncf.edu/test/")
         assert "https://www.ncf.edu/test/" in result
 
+    def test_untrusted_header_present(self):
+        """Output must carry the UNTRUSTED EVIDENCE header on every conversion."""
+        html = b"<html><body><p>Some content.</p></body></html>"
+        result = self.cs.convert_html(html, "https://www.ncf.edu/")
+        assert "UNTRUSTED EVIDENCE" in result
+
+    def test_no_boilerplate_clean_html(self):
+        """Negative control: HTML with no boilerplate classes passes through intact."""
+        html = (
+            b"<html><body>"
+            b"<main><p>Clean content.</p></main>"
+            b"</body></html>"
+        )
+        result = self.cs.convert_html(html, "https://www.ncf.edu/")
+        assert "Clean content." in result
+        assert "UNTRUSTED EVIDENCE" in result
+
+    def test_double_match_nested_boilerplate(self):
+        """Both ancestor and descendant match removal criteria: neither crashes nor leaks."""
+        html = (
+            b"<html><body>"
+            b'<nav class="nav"><div class="menu"><span>Submenu</span></div></nav>'
+            b"<main><p>Real content.</p></main>"
+            b"</body></html>"
+        )
+        result = self.cs.convert_html(html, "https://www.ncf.edu/")
+        assert "Real content." in result
+        assert "Submenu" not in result
+        assert "UNTRUSTED EVIDENCE" in result
+
     def test_nested_boilerplate_does_not_crash(self):
         """Regression: decomposing a parent tag during find_all(True) iteration
         invalidated its child nodes, causing AttributeError: 'NoneType' object
@@ -682,6 +712,176 @@ class TestDuplicateIdCheck:
         ]
         errors = self.vs.check_duplicate_ids(sidecars)
         assert errors == []
+
+
+class TestManifestPosixPaths:
+    """Regression: manifest sidecar_file must use POSIX separators on all platforms."""
+
+    @pytest.fixture(autouse=True)
+    def skip_if_no_jsonschema(self):
+        pytest.importorskip("jsonschema", reason="jsonschema not installed")
+
+    def setup_method(self):
+        import validate_sources as vs
+        self.vs = vs
+
+    def _minimal_data(self):
+        return {
+            "id": "posix-test",
+            "resource_file": "resources/shared/test.md",
+            "title": "Test",
+            "audiences": ["students"],
+            "topics": ["test"],
+            "sources": [],
+            "status": "current",
+            "volatility": "stable",
+            "review_after": "2027-01-01",
+            "notes": "",
+        }
+
+    def test_posix_path_in_manifest(self):
+        """sidecar_file in manifest must use forward slashes even on Windows."""
+        win_path = Path("resources\\shared\\test.source.json")
+        sidecars = [(win_path, self._minimal_data())]
+        manifest = self.vs.build_manifest(sidecars)
+        sidecar_file = manifest["resources"][0]["sidecar_file"]
+        assert "\\" not in sidecar_file, (
+            f"sidecar_file contains backslashes on this platform: {sidecar_file!r}"
+        )
+        assert "/" in sidecar_file
+
+    def test_posix_path_control(self):
+        """POSIX path input also produces a POSIX sidecar_file (control)."""
+        posix_path = Path("resources/shared/test.source.json")
+        sidecars = [(posix_path, self._minimal_data())]
+        manifest = self.vs.build_manifest(sidecars)
+        sidecar_file = manifest["resources"][0]["sidecar_file"]
+        assert "\\" not in sidecar_file
+        assert "resources/shared/test.source.json" == sidecar_file
+
+
+class TestStructuredConstraints:
+    """#37: optional required_resources and conflicts fields pass/fail schema correctly."""
+
+    @pytest.fixture(autouse=True)
+    def skip_if_no_jsonschema(self):
+        pytest.importorskip("jsonschema", reason="jsonschema not installed")
+
+    def setup_method(self):
+        import validate_sources as vs
+        self.vs = vs
+        schema_path = ROOT / "schemas" / "source-record.schema.json"
+        if not schema_path.exists():
+            pytest.skip("source-record.schema.json not present")
+        self.schema = vs.load_schema()
+        self.validator = vs.make_validator(self.schema)
+
+    def _base(self):
+        with (FIXTURES / "valid.source.json").open() as f:
+            return json.load(f)
+
+    # --- required_resources ---
+
+    def test_required_resources_absent_still_valid(self):
+        """Existing sidecars without required_resources remain valid."""
+        data = self._base()
+        data.pop("required_resources", None)
+        errors = list(self.validator.iter_errors(data))
+        assert errors == [], [str(e) for e in errors]
+
+    def test_required_resources_valid_entry(self):
+        data = self._base()
+        data["required_resources"] = [
+            {"resource_id": "academic-calendar", "reason": "provides term context"}
+        ]
+        errors = list(self.validator.iter_errors(data))
+        assert errors == [], [str(e) for e in errors]
+
+    def test_required_resources_invalid_id_format_fails(self):
+        data = self._base()
+        data["required_resources"] = [
+            {"resource_id": "Bad ID!", "reason": "some reason"}
+        ]
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0
+
+    def test_required_resources_missing_reason_fails(self):
+        data = self._base()
+        data["required_resources"] = [{"resource_id": "academic-calendar"}]
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0
+
+    # --- conflicts ---
+
+    def test_conflicts_absent_still_valid(self):
+        """Existing sidecars without conflicts remain valid."""
+        data = self._base()
+        data.pop("conflicts", None)
+        errors = list(self.validator.iter_errors(data))
+        assert errors == [], [str(e) for e in errors]
+
+    def test_conflicts_valid_unresolved_entry(self):
+        data = self._base()
+        data["conflicts"] = [{
+            "conflict_id": "add-drop-deadline-2026",
+            "status": "unresolved",
+            "sources": [
+                "https://catalog.ncf.edu/undergraduate/",
+                "https://www.ncf.edu/registrar/calendar/",
+            ],
+            "claims": [
+                "Add/drop ends the fifth day of classes",
+                "Add/drop ends the seventh day of classes",
+            ],
+            "applicability": "Fall 2026 undergraduate add/drop deadline",
+            "responsible_office": "NCF Registrar",
+        }]
+        errors = list(self.validator.iter_errors(data))
+        assert errors == [], [str(e) for e in errors]
+
+    def test_conflicts_invalid_status_fails(self):
+        data = self._base()
+        data["conflicts"] = [{
+            "conflict_id": "test-conflict",
+            "status": "maybe",
+            "sources": [
+                "https://catalog.ncf.edu/undergraduate/",
+                "https://www.ncf.edu/registrar/",
+            ],
+            "claims": ["claim a", "claim b"],
+            "applicability": "Fall 2026",
+            "responsible_office": "NCF Registrar",
+        }]
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0
+
+    def test_conflicts_fewer_than_two_sources_fails(self):
+        data = self._base()
+        data["conflicts"] = [{
+            "conflict_id": "test-conflict",
+            "status": "unresolved",
+            "sources": ["https://catalog.ncf.edu/undergraduate/"],
+            "claims": ["only one claim"],
+            "applicability": "Fall 2026",
+            "responsible_office": "NCF Registrar",
+        }]
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0
+
+    def test_conflicts_missing_applicability_fails(self):
+        data = self._base()
+        data["conflicts"] = [{
+            "conflict_id": "test-conflict",
+            "status": "unresolved",
+            "sources": [
+                "https://catalog.ncf.edu/undergraduate/",
+                "https://www.ncf.edu/registrar/",
+            ],
+            "claims": ["claim a", "claim b"],
+            "responsible_office": "NCF Registrar",
+        }]
+        errors = list(self.validator.iter_errors(data))
+        assert len(errors) > 0
 
 
 # ---------------------------------------------------------------------------

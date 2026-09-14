@@ -150,6 +150,84 @@
     "notes": {
       "type": "string",
       "description": "Known conflicts, coverage gaps, ambiguities, or empty string if none. Required field; do not omit even if empty."
+    },
+    "required_resources": {
+      "type": "array",
+      "description": "Optional. Resources that must be loaded before this one can support a class of answer. Each entry names the required resource and explains why. Existing sidecars without this field remain valid.",
+      "items": {
+        "type": "object",
+        "required": ["resource_id", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Stable kebab-case ID of the resource that must be present."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Why this resource depends on the named one, e.g. 'provides the catalog-year context required to interpret deadlines'."
+          }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "description": "Optional. Known conflicts between two or more public sources on a claim covered by this resource. Structured so Agent 7 can surface unresolved conflicts without parsing prose. Existing sidecars without this field remain valid.",
+      "items": {
+        "type": "object",
+        "required": [
+          "conflict_id",
+          "status",
+          "sources",
+          "claims",
+          "applicability",
+          "responsible_office"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "conflict_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Stable kebab-case identifier for this conflict record."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["unresolved", "resolved", "deferred"],
+            "description": "'unresolved' = no authoritative ruling yet; 'resolved' = owning office confirmed; 'deferred' = known but not blocking Version 1."
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 2,
+            "description": "Two or more public source URLs making incompatible claims.",
+            "items": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            }
+          },
+          "claims": {
+            "type": "array",
+            "minItems": 2,
+            "description": "One short quoted or paraphrased claim per source, in the same order as 'sources'.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "applicability": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Scope where the conflict applies, e.g. 'Fall 2026 add/drop deadline for undergraduate students'."
+          },
+          "responsible_office": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Office that can issue an authoritative ruling, e.g. 'NCF Registrar'."
+          }
+        }
+      }
     }
   }
 }

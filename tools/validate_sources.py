@@ -237,7 +237,7 @@ def build_manifest(sidecars: list[tuple[Path, dict]]) -> dict:
                 for s in data.get("sources", [])
                 if s.get("canonical_url")
             ],
-            "sidecar_file": str(path),
+            "sidecar_file": path.as_posix(),
             "record": data,
         })
 
